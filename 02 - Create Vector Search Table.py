@@ -1,28 +1,5 @@
 # Databricks notebook source
-# MAGIC %md
-# MAGIC #Initialize Vector Database
-# MAGIC We will embded a collection of images and store the embeddings in a delta table. The table will be then be pointed to a vector search endpoint.
-# MAGIC
-# MAGIC ###OpenAI CLIP
-# MAGIC Medium Article - https://towardsdatascience.com/quick-fire-guide-to-multi-modal-ml-with-openais-clip-2dad7e398ac0
-# MAGIC
-# MAGIC Blog Post - https://openai.com/research/clip
-# MAGIC
-# MAGIC Github - https://github.com/openai/CLIP
-# MAGIC
-# MAGIC HuggingFace - https://huggingface.co/openai/clip-vit-base-patch32
-# MAGIC
-# MAGIC YouTube Tutorial - https://www.youtube.com/watch?v=989aKUVBfbk
-
-# COMMAND ----------
-
 !pip install torch transformers datasets
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ###Setup
-# MAGIC Load Images and Model
 
 # COMMAND ----------
 
@@ -55,21 +32,7 @@ processor = CLIPProcessor.from_pretrained(model_id)
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ##Create Embeddings
-# MAGIC The next steps include:
-# MAGIC 1. Embedding a prompt (plain text) using the open source model
-# MAGIC 2. Embed an image using the same model
-# MAGIC 3. Embed several images in a batch process
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ###Text Embeddings
-
-# COMMAND ----------
-
-prompt = "a person in a field"
+prompt = "a dog in the snow"
 
 #tokenize the prompt
 
@@ -80,11 +43,6 @@ inputs
 
 text_emb = model.get_text_features(**inputs)
 text_emb.shape
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ###Image Embeddings
 
 # COMMAND ----------
 
@@ -111,12 +69,6 @@ image_emb.shape
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ###Batch Processing
-# MAGIC We'll embed about 100 images to compare to our initial prompt.
-
-# COMMAND ----------
-
 #get a subset of 100 images for this experiment
 import numpy as np
 
@@ -127,7 +79,7 @@ len(images)
 
 # COMMAND ----------
 
-# DBTITLE 1,Image Batch Embedding Generator
+# DBTITLE 1,Image Batch Embedding Processor
 from tqdm.auto import tqdm
 
 batch_size = 16
@@ -156,39 +108,58 @@ for i in tqdm(range(0, len(images), batch_size)):
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ##Evaluation
+from pyspark.sql.functions import col
+from pyspark.sql.types import ArrayType, FloatType
+
+# Assuming `spark` is your SparkSession and `df` is your existing DataFrame
+
+# Step 1: Convert the numpy array to a list of lists
+image_list = image_arr.tolist()
+
+# Step 2: Create a new DataFrame from the list of lists
+rdd = spark.sparkContext.parallelize(image_list)
+schema = ArrayType(FloatType())
+image_df = rdd.map(lambda x: (x,)).toDF(schema=["image_embeddings"])
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ###Calculate Scores
+# Convert DataFrame to RDD
+df_rdd = image_df.rdd
+
+# Zip with index (which returns a new RDD)
+rdd_with_index = df_rdd.zipWithIndex()
+
+# Convert the resulting RDD into a DataFrame
+# The result is a tuple where the first element is the original row and the second element is the index
+df_with_index = rdd_with_index.map(lambda row: (row[1],) + tuple(row[0])).toDF(["index"] + image_df.columns)
+
+# Now df_with_index is the same as df but with an additional "index" column
 
 # COMMAND ----------
 
-#normalize the values in the image array
-image_arr = image_arr.T / np.linalg.norm(image_arr, axis=1)
-
-#get the text embedding from ealier
-text_emb = text_emb.cpu().detach().numpy()
-
-#calculate the scores and get the top 5
-scores = np.dot(text_emb, image_arr)
-
-top_k = 5
-idx = np.argsort(-scores[0])[:top_k]
-
-idx
+df_with_index.display()
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ###Show Results
+images = spark.table("field_demos.luke_sandbox.images")
 
 # COMMAND ----------
 
-# show the images and their scores
-for i in idx:
-  print(scores[0][i])
-  plt.imshow(images[i])
-  plt.show()
+# Assuming the 'images' DataFrame has already been read into the 'images' variable
+images_rdd = images.rdd
+
+# Zip with index (which returns an RDD of pairs)
+images_rdd_with_index = images_rdd.zipWithIndex()
+
+# Map to a DataFrame by including the index
+# The lambda function maps the original row (row[0]) and the index (row[1]) to a new row
+images_with_index = images_rdd_with_index.map(
+    lambda row: (row[1],) + tuple(row[0])
+).toDF(["index"] + images.columns)
+
+# Show the new DataFrame with the index
+images_with_index.display()
+
+# COMMAND ----------
+
+
