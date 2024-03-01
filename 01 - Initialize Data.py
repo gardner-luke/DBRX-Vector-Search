@@ -29,9 +29,8 @@ imagenette[0]["image"]
 
 # COMMAND ----------
 
-import io
+# DBTITLE 1,Spark Image Serialization Workflow
 from pyspark.sql import Row
-from pyspark.sql.functions import monotonically_increasing_id
 
 def image_to_byte_array(image):
     imgByteArr = io.BytesIO()
@@ -39,21 +38,21 @@ def image_to_byte_array(image):
     imgByteArr = imgByteArr.getvalue()
     return imgByteArr
 
-# Convert images to byte arrays and create Rows
-rows = [Row(image=image_to_byte_array(item['image']), label=item['label']) for item in imagenette]
+# Add an index to each image and label when creating Rows
+rows_with_index = [Row(id=i, image=image_to_byte_array(item['image']), label=item['label']) 
+                   for i, item in enumerate(imagenette)]
 
-# Create a DataFrame from the list of Rows
-df = spark.createDataFrame(rows)
-# Add a unique identifier column to the DataFrame
-df = df.withColumn("id", monotonically_increasing_id())
+# Create a DataFrame from the list of Rows with index
+df_with_index = spark.createDataFrame(rows_with_index)
 
-#spark.sql(f"CREATE CATALOG IF NOT EXISTS {catalog_name}")
-#spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog_name}.{schema_name}")
-
-# Write the DataFrame to the Delta table
-df.write.format("delta") \
+# Write the DataFrame with index to the Delta table
+df_with_index.write.format("delta") \
     .mode("overwrite") \
     .saveAsTable(f"{catalog_name}.{schema_name}.{table_name}")
 
 # Show the DataFrame
-df.display()
+df_with_index.display()
+
+# COMMAND ----------
+
+
