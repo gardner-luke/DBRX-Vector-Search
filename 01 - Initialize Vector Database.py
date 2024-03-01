@@ -4,11 +4,15 @@
 # MAGIC We will embded a collection of images and store the embeddings in a delta table. The table will be then be pointed to a vector search endpoint.
 # MAGIC
 # MAGIC ###OpenAI CLIP
+# MAGIC Medium Article - https://towardsdatascience.com/quick-fire-guide-to-multi-modal-ml-with-openais-clip-2dad7e398ac0
+# MAGIC
 # MAGIC Blog Post - https://openai.com/research/clip
 # MAGIC
 # MAGIC Github - https://github.com/openai/CLIP
 # MAGIC
 # MAGIC HuggingFace - https://huggingface.co/openai/clip-vit-base-patch32
+# MAGIC
+# MAGIC YouTube Tutorial - https://www.youtube.com/watch?v=989aKUVBfbk
 
 # COMMAND ----------
 
@@ -65,7 +69,7 @@ processor = CLIPProcessor.from_pretrained(model_id)
 
 # COMMAND ----------
 
-prompt = "a dog in the snow"
+prompt = "a person in a field"
 
 #tokenize the prompt
 
@@ -123,7 +127,7 @@ len(images)
 
 # COMMAND ----------
 
-# DBTITLE 1,Progressive Batch Image Embedding
+# DBTITLE 1,Image Batch Embedding Generator
 from tqdm.auto import tqdm
 
 batch_size = 16
@@ -149,24 +153,24 @@ for i in tqdm(range(0, len(images), batch_size)):
     image_arr = batch_emb
   else:
     image_arr = np.concatenate((image_arr, batch_emb), axis=0)
-image_arr.shape
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ##Score the prompt against the images
+# MAGIC ##Evaluation
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ###Calculate Scores
 
 # COMMAND ----------
 
 #normalize the values in the image array
 image_arr = image_arr.T / np.linalg.norm(image_arr, axis=1)
 
-# COMMAND ----------
-
 #get the text embedding from ealier
 text_emb = text_emb.cpu().detach().numpy()
-
-# COMMAND ----------
 
 #calculate the scores and get the top 5
 scores = np.dot(text_emb, image_arr)
@@ -178,6 +182,12 @@ idx
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ###Show Results
+
+# COMMAND ----------
+
+# show the images and their scores
 for i in idx:
   print(scores[0][i])
   plt.imshow(images[i])
