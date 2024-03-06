@@ -72,9 +72,15 @@ image_emb.shape
 #get a subset of 100 images for this experiment
 import numpy as np
 
-np.random.seed(0)
-sample_idx = np.random.randint(0, len(imagenette)+1,100).tolist()
-images = [imagenette[i]['image'] for i in sample_idx]
+#np.random.seed(0)
+#sample_idx = np.random.randint(0, len(imagenette)+1,100).tolist()
+#images = [imagenette[i]['image'] for i in sample_idx]
+#len(images)
+
+# COMMAND ----------
+
+integer_list = [i for i in range(9469)]
+images = [imagenette[i]['image'] for i in integer_list]
 len(images)
 
 # COMMAND ----------
@@ -138,27 +144,56 @@ df_with_index = rdd_with_index.map(lambda row: (row[1],) + tuple(row[0])).toDF([
 # COMMAND ----------
 
 df_with_index.display()
+print(df_with_index.count())
+
+# COMMAND ----------
+
+df_with_index.count()
 
 # COMMAND ----------
 
 images = spark.table("field_demos.luke_sandbox.images")
+images.display()
 
 # COMMAND ----------
 
-# Assuming the 'images' DataFrame has already been read into the 'images' variable
-images_rdd = images.rdd
+images.display()
 
-# Zip with index (which returns an RDD of pairs)
-images_rdd_with_index = images_rdd.zipWithIndex()
+# COMMAND ----------
 
-# Map to a DataFrame by including the index
-# The lambda function maps the original row (row[0]) and the index (row[1]) to a new row
-images_with_index = images_rdd_with_index.map(
-    lambda row: (row[1],) + tuple(row[0])
-).toDF(["index"] + images.columns)
+# drop id and label because they are unnecessary, drop image because binary type is not supported in vector search
+df_images_joined = df_with_index.join(images, df_with_index["index"] == images["id"]).drop("id", "label","image")
 
-# Show the new DataFrame with the index
-images_with_index.display()
+# COMMAND ----------
+
+df_images_joined.display()
+print(df_images_joined.count())
+
+# COMMAND ----------
+
+catalog_name = "field_demos"
+schema_name = "luke_sandbox"
+table_name = "images_with_embeddings"
+
+df_images_joined.write.format("delta") \
+    .mode("overwrite") \
+    .saveAsTable(f"{catalog_name}.{schema_name}.{table_name}")
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC ALTER TABLE `field_demos`.`luke_sandbox`.`images_with_embeddings` SET TBLPROPERTIES (delta.enableChangeDataFeed = true)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Creating a vector search endpoint can be done through the UI or you can use the Python SDK
+# MAGIC
+# MAGIC https://docs.databricks.com/en/generative-ai/create-query-vector-search.html#create-a-vector-search-endpoint-using-the-python-sdk
+# MAGIC
+# MAGIC Creating a vector index can be done using the SDK as well
+# MAGIC
+# MAGIC https://docs.databricks.com/en/generative-ai/create-query-vector-search.html#create-index-using-the-python-sdk
 
 # COMMAND ----------
 
