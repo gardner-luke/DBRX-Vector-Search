@@ -5,7 +5,7 @@
 
 # COMMAND ----------
 
-!pip install torch transformers datasets
+!pip install torch transformers datasets pillow
 
 # COMMAND ----------
 
@@ -29,7 +29,7 @@ processor = CLIPProcessor.from_pretrained(model_id)
 
 # COMMAND ----------
 
-prompt = "a dog in the snow"
+prompt = "a dog playing in the snow"
 
 #tokenize the prompt
 
@@ -40,6 +40,64 @@ inputs
 
 text_emb = model.get_text_features(**inputs)
 prompt_emb = text_emb[0].tolist()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Query with REST API
+# MAGIC Here is documentation to execute the query: https://docs.databricks.com/api/workspace/vectorsearchindexes/queryindex
+
+# COMMAND ----------
+
+# DBTITLE 1,Semantic Vector Search Query
+# Example query payload, adjust according to your needs
+payload = {"query_vector": prompt_emb,
+            "columns": ["index"],
+            "num_results": 10
+}
+
+response = requests.post(api_url, headers=headers, data=json.dumps(payload))
+
+if response.status_code == 200:
+    results = response.json()
+    print("Search results:", results)
+else:
+    print("Failed to search the vector database:", response.text)
+
+# COMMAND ----------
+
+response.json()["result"]["data_array"]
+
+# COMMAND ----------
+
+# Assuming 'results' variable contains the response data array from vector search
+search_results_df = spark.createDataFrame(response.json()["result"]["data_array"]).withColumnRenamed("_1", "index").withColumnRenamed("_2", "similarity_score")
+
+# Load the 'images' table as a DataFrame
+images_df = spark.table("field_demos.luke_sandbox.images")
+
+# Perform the join on 'index' from search results and 'id' from images
+joined_df = search_results_df.join(images_df, search_results_df.index == images_df.id)
+
+# COMMAND ----------
+
+joined_df.display()
+
+# COMMAND ----------
+
+from io import BytesIO
+from PIL import Image
+import IPython.display as display
+
+# Function to convert binary data to an image and display it
+def display_images(images_df):
+    for row in images_df.collect():
+        image_data = row['image']  # Extract binary image data
+        image = Image.open(BytesIO(image_data))  # Convert to image object
+        display.display(image)  # Display the image
+
+# Assuming 'joined_df' is the DataFrame with the image column after joining
+display_images(joined_df)
 
 # COMMAND ----------
 
@@ -122,6 +180,28 @@ results = vector_search.search(index_name="field_demos.luke_sandbox.image_embedd
 
 for result in results:
     print(result)
+
+# COMMAND ----------
+
+# DBTITLE 1,Databricks Image Search Client
+import requests
+import json
+
+# Replace these with the actual values
+index_name = "field_demos.luke_sandbox.image_embeddings_vs"
+api_url = f"https://e2-dogfood.staging.cloud.databricks.com/api/2.0/vector-search/indexes/{index_name}/query"
+token = "your_databricks_token"
+
+# Example query payload, adjust according to your needs
+payload = {"query_vector": prompt_emb,
+            "columns": ["index"],
+            "num_results": 10
+}
+
+headers = {
+    "Authorization": f"Bearer xxxxxx",
+    "Content-Type": "application/json"
+}
 
 # COMMAND ----------
 
