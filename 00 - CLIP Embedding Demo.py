@@ -1,14 +1,15 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC #CLIP Embedding Demo
-# MAGIC Create embeddings for text prompts and images to be used in a single vector search index.
+# MAGIC Create embeddings for a text prompt and images. Store the images in a vector index and query them using the text prompt.
 # MAGIC
-# MAGIC ###OpenAI CLIP
-# MAGIC HuggingFace - https://huggingface.co/openai/clip-vit-base-patch32
+# MAGIC 1. Create embedding for text prompt
+# MAGIC 2. Create embedding for image
+# MAGIC 3. Create embeddings for several images and load to vector search index.
+# MAGIC 4. Use embedding from text prompt to query vector index.
 # MAGIC
-# MAGIC Medium Article - https://towardsdatascience.com/quick-fire-guide-to-multi-modal-ml-with-openais-clip-2dad7e398ac0
-# MAGIC
-# MAGIC YouTube Tutorial - https://www.youtube.com/watch?v=989aKUVBfbk
+# MAGIC ###OpenAI CLIP Documentation and Tutorials
+# MAGIC [HuggingFace](https://huggingface.co/openai/clip-vit-base-patch32) | [Medium Article](https://towardsdatascience.com/quick-fire-guide-to-multi-modal-ml-with-openais-clip-2dad7e398ac0) | [YouTube Tutorial](https://www.youtube.com/watch?v=989aKUVBfbk)
 
 # COMMAND ----------
 
@@ -17,12 +18,12 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ###Setup
-# MAGIC Load Images and Model
+# MAGIC ###Load Images
+# MAGIC These images come from a public dataset on [Hugging Face](https://huggingface.co/). The dataset [Imagenette](https://huggingface.co/datasets/frgfm/imagenette) contains nearly 10,000 images that can be classified into 10 classes (labels).
 
 # COMMAND ----------
 
-#load images
+# load images
 from datasets import load_dataset
 
 imagenette = load_dataset(
@@ -32,11 +33,15 @@ imagenette = load_dataset(
   ignore_verifications=False
 )
 
-imagenette[0]["image"]
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ###Load Model
+# MAGIC [OpenAI's CLIP](https://huggingface.co/openai/clip-vit-base-patch32) embedding model is built specifically for computer vision tasks and allows us to create numberic representations of images and text alike. This enables us to query images and/or text with either mode as input.
 
 # COMMAND ----------
 
-#load model
+# load model
 from transformers import CLIPTokenizerFast, CLIPProcessor, CLIPModel
 import torch
 
@@ -53,27 +58,24 @@ processor = CLIPProcessor.from_pretrained(model_id)
 
 # MAGIC %md
 # MAGIC ##Create Embeddings
-# MAGIC The next steps include:
-# MAGIC 1. Embedding a prompt (plain text) using the open source model
-# MAGIC 2. Embed an image using the same model
-# MAGIC 3. Embed several images in a batch process
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ###Text Embeddings
+# MAGIC The prompt defined in the first line can be anything you'd like. In this example we will use "a dog in the snow". This can be updated to whatever you'd like. Results will vary depending on the input prompt.
 
 # COMMAND ----------
 
 prompt = "a dog in the snow"
 
-#tokenize the prompt
-
+# tokenize the prompt
 inputs = tokenizer(prompt, return_tensors="pt")
 inputs
 
 # COMMAND ----------
 
+# use the tokenized prompt to get 512 dimension embedding stored in the variable text_emb
 text_emb = model.get_text_features(**inputs)
 text_emb.shape
 
@@ -81,11 +83,12 @@ text_emb.shape
 
 # MAGIC %md
 # MAGIC ###Image Embeddings
+# MAGIC Similarly to the text embedding above we will use the model to generate a 512 dimension embedding of the image. Instead of pre-processing the data with the tokenizer, we will use the processor.
 
 # COMMAND ----------
 
-#resizing the image with proceessor
-#expected shape is torch.Size([1, 3, 224, 224])
+# resizing the image with proceessor
+# expected shape is torch.Size([1, 3, 224, 224])
 image = processor(text=None,
                   images = imagenette[0]['image'],
                   return_tensors="pt")['pixel_values'].to(device)
@@ -93,15 +96,7 @@ image.shape
 
 # COMMAND ----------
 
-import matplotlib.pyplot as plt
-
-#resize the image and show it
-#the pixels have been modified which is why the image looks distorted
-plt.imshow(image.squeeze(0).T)
-
-# COMMAND ----------
-
-#after this line you will have a 512 dimension embedding vector
+# after this line you will have a 512 dimension embedding vector
 image_emb = model.get_image_features(image)
 image_emb.shape
 
@@ -109,11 +104,11 @@ image_emb.shape
 
 # MAGIC %md
 # MAGIC ###Batch Processing
-# MAGIC We'll embed about 100 images to compare to our initial prompt.
+# MAGIC Using a subset of 100 images, we will create embeddings of 16 images at a time and store the results in a variable called image_arr.
 
 # COMMAND ----------
 
-#get a subset of 100 images for this experiment
+# get a subset of 100 images for this experiment
 import numpy as np
 
 np.random.seed(0)
@@ -123,28 +118,27 @@ len(images)
 
 # COMMAND ----------
 
-# DBTITLE 1,Image Batch Embedding Generator
 from tqdm.auto import tqdm
 
 batch_size = 16
 image_arr = None
 
 for i in tqdm(range(0, len(images), batch_size)):
-  #select batch of images
+  # select batch of images
   batch = images[i:i+batch_size]
-  #process and resize images
+  # process and resize images
   batch = processor(text=None,
                   images = batch,
                   return_tensors="pt",
                   padding=True,
                   is_train=False)['pixel_values'].to(device)
   
-  #get image embeddings
+  # get image embeddings
   batch_emb = model.get_image_features(pixel_values=batch)
-  #convert to numpy array
+  # convert to numpy array
   batch_emb = batch_emb.squeeze(0)
   batch_emb = batch_emb.cpu().detach().numpy()
-  #add to larger array of all image embeddings
+  # add to larger array of all image embeddings
   if image_arr is None:
     image_arr = batch_emb
   else:
@@ -159,18 +153,20 @@ for i in tqdm(range(0, len(images), batch_size)):
 
 # MAGIC %md
 # MAGIC ###Calculate Scores
+# MAGIC Scores are stored in an image array and normalized. The normalized data is then compared to the embedding from our original prompt.
 
 # COMMAND ----------
 
-#normalize the values in the image array
+# normalize the values in the image array
 image_arr = image_arr.T / np.linalg.norm(image_arr, axis=1)
 
-#get the text embedding from ealier
+# get the text embedding from ealier
 text_emb = text_emb.cpu().detach().numpy()
 
-#calculate the scores and get the top 5
+# calculate the scores between the text embedding and the image array
 scores = np.dot(text_emb, image_arr)
 
+# return only the top 5
 top_k = 5
 idx = np.argsort(-scores[0])[:top_k]
 
@@ -180,8 +176,11 @@ idx
 
 # MAGIC %md
 # MAGIC ###Show Results
+# MAGIC The scores have been normalized and are presented above each image in the output of the final code block. A larger number indicates a closer relationship between the input data and the result.
 
 # COMMAND ----------
+
+import matplotlib.pyplot as plt
 
 # show the images and their scores
 for i in idx:
